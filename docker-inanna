@@ -1,100 +1,336 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2086
+# (Lists of Docker IDs and names are word-split on purpose throughout.)
+#
+# 𒀭𒈹 docker-inanna — the Descent of Inanna, as a Docker purge
+#
+# Strips Docker bare in seven gates, as Inanna is stripped of her regalia at
+# the seven gates of the underworld in the Sumerian poem "Inana's descent to
+# the nether world" (ETCSL 1.4.1). Every container, image, custom network,
+# volume (named ones too) and all build cache is removed. There is no
+# confirmation and no undo.
+#
+# Also a Docker CLI plugin: link it into ~/.docker/cli-plugins/ and run
+# `docker inanna`.
+
 set -euo pipefail
 
+VERSION="1.0.0"
+PACE="${INANNA_PACE:-1.3}"   # seconds between ritual steps; 0 for none
+
 # ─────────────────────────────────────────────
-# 𒈹 Inanna’s Descent into the Underworld 𒈹
-# A Ritual Cleansing of Docker
+# Docker CLI plugin handshake
 # ─────────────────────────────────────────────
 
-# Ritual pacing (seconds)
-PACE=1.3
-
-# Speak as the gatekeepers do
-say() {
-  echo -e "\n\033[35m𒈹 𒀭𒈹  $1  𒈹𒀭𒈹\033[0m"
-  sleep "$PACE"
-}
-
-# Run commands without breaking the ritual
-run() {
-  "$@" 2>/dev/null || true
-}
-
-clear
-echo -e "\033[35m"
-cat <<'EOF'
-𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹
-𒀭𒈹 Inanna, Queen of Heaven, turns her gaze below 𒈹𒀭
-𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹
+if [[ "${1:-}" == "docker-cli-plugin-metadata" ]]; then
+  cat <<EOF
+{"SchemaVersion":"0.1.0","Vendor":"A Bewsey","Version":"v${VERSION}","ShortDescription":"Wipe Docker completely, in seven gates","URL":"https://github.com/AndrewBewseyTNA/docker-inanna"}
 EOF
-echo -e "\033[0m"
-sleep 2
-
-say "Gate I — The Shugurra Crown is Removed (running containers)"
-run docker kill $(docker ps -q)
-
-say "Gate II — The Measuring Rod and Line Are Taken (all containers)"
-run docker rm $(docker ps -aq)
-
-say "Gate III — The Lapiz Jewels Are Stripped Away (images)"
-run docker rmi $(docker images -aq)
-
-say "Gate IV — The Tablets of Destiny Are Shattered (volumes)"
-run docker volume rm $(docker volume ls -q)
-
-say "Gate V — The Roads to the City Are Unmade (networks)"
-run docker network rm $(docker network ls -q)
-
-say "Gate VI — Memory and Craft Are Scoured Clean (build cache)"
-run docker builder prune -af
-
-say "Gate VII — All Names Are Forgotten (final system prune)"
-docker system prune -af --volumes
-
-sleep 1.5
-echo
-echo -e "\033[35m☿  Inanna stands before Ereshkigal.\033[0m"
-sleep 1
-echo -e "\033[35m☿  The old forms are dust.\033[0m"
-sleep 1
-echo -e "\033[35m☿  Docker is purified. The descent is complete.\033[0m"
-echo
-
-# ─────────────────────────────────────────────
-# The Ascent — optional resurrection
-# ─────────────────────────────────────────────
-
-COMPOSE_FILE=""
-if [[ -f "docker-compose.yml" ]]; then
-  COMPOSE_FILE="docker-compose.yml"
-elif [[ -f "docker-compose.yaml" ]]; then
-  COMPOSE_FILE="docker-compose.yaml"
+  exit 0
 fi
 
-ASCENT_CMD="${1:-}"
+# Run as `docker inanna`, docker passes its arguments on, plugin name first
+if [[ "${1:-}" == "inanna" ]]; then
+  shift
+fi
 
-if [[ -n "$ASCENT_CMD" ]]; then
-  # Explicit command passed as argument
-  say "The Ascent — Inanna returns, bearing new forms"
-  sleep 1
-  echo -e "\033[35m☿  Running: $ASCENT_CMD\033[0m"
-  echo
-  eval "$ASCENT_CMD"
-elif [[ -n "$COMPOSE_FILE" ]]; then
-  # Found a compose file in cwd — ask whether to bring it up
-  echo -e "\033[35m☿  A docker-compose file stirs in the ruins: $COMPOSE_FILE\033[0m"
-  sleep 1
-  echo -e "\033[35m☿  Shall Inanna ascend and raise what was lost? [y/N]\033[0m "
-  read -r -t 15 ANSWER || ANSWER="n"
-  if [[ "${ANSWER,,}" == "y" ]]; then
-    say "The Ascent — Inanna returns, bearing new forms"
-    docker compose up -d
-    echo
-    echo -e "\033[35m☿  The world is rebuilt. Inanna reigns again.\033[0m"
+# ─────────────────────────────────────────────
+# Arguments
+# ─────────────────────────────────────────────
+
+usage() {
+  cat <<'EOF'
+Usage: docker-inanna [options] [ascent command...]
+       docker inanna [options] [ascent command...]
+
+Wipes Docker completely, in seven gates: running containers, all containers,
+images, custom networks, volumes (named ones too), build cache, and a final
+system prune. It acts on the current Docker context straight away: there is
+no confirmation and no undo.
+
+Afterwards it runs the ascent command, if you give one:
+  docker-inanna "docker compose up --build"
+Otherwise, if a compose file is in the current directory, it offers to bring
+it back up with `docker compose up -d`.
+
+Options:
+  -h, --help       Show this help
+  -V, --version    Show the version
+
+Environment:
+  INANNA_PACE      Seconds between ritual steps (default 1.3; 0 for none)
+  NO_COLOR         Turn colour off
+EOF
+}
+
+die() {
+  printf 'docker-inanna: %s\n' "$*" >&2
+  exit 1
+}
+
+while (( $# )); do
+  case "$1" in
+    -h|--help)    usage; exit 0 ;;
+    -V|--version) echo "docker-inanna $VERSION"; exit 0 ;;
+    --)           shift; break ;;
+    -*)           printf 'docker-inanna: unknown option %s (see --help)\n' "$1" >&2; exit 2 ;;
+    *)            break ;;
+  esac
+done
+ASCENT_CMD="$*"
+
+[[ $PACE =~ ^([0-9]+\.?[0-9]*|\.[0-9]+)$ ]] ||
+  die "INANNA_PACE must be a number of seconds, not '$PACE'"
+
+# ─────────────────────────────────────────────
+# The voice of the ritual
+# ─────────────────────────────────────────────
+
+# Lapis lazuli and gold: the two materials of her regalia
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  LAPIS=$'\e[38;5;27m' GOLD=$'\e[38;5;178m' DIM=$'\e[2m' RESET=$'\e[0m'
+else
+  LAPIS="" GOLD="" DIM="" RESET=""
+fi
+
+pause() { sleep "$PACE"; }
+line()  { printf '%s\n' "$*"; }
+dim()   { printf '%s%s%s\n' "$DIM" "$*" "$RESET"; }
+star()  { printf '%s✷%s  %s\n' "$GOLD" "$RESET" "$*"; }
+warn()  { printf '    %s! %s%s\n' "$DIM" "$*" "$RESET" >&2; }
+
+# heading <glyph> <title>
+heading() {
+  printf '\n%s%s  %s%s\n' "$LAPIS" "$1" "$2" "$RESET"
+}
+
+# gate <cuneiform numeral> <ordinal> <what is taken from her>
+gate() {
+  heading "$1" "The $2 gate"
+  line "    $3"
+  pause
+}
+
+# What she asks at every gate, and the answer she is given
+refrain() {
+  dim '    "What is this?"'
+  dim '    "Be satisfied, Inanna: a divine power of the underworld has been'
+  dim '     fulfilled. Inanna, you must not open your mouth against the rites'
+  dim '     of the underworld."'
+}
+
+# carried <number> <singular> <plural> <verb>
+carried() {
+  if (( $1 == 0 )); then
+    line "    ↳ no $3"
+  elif (( $1 == 1 )); then
+    line "    ↳ 1 $2 $4"
   else
-    echo -e "\033[35m☿  She remains below. Rebuild when you are ready.\033[0m"
+    line "    ↳ $1 $3 $4"
+  fi
+}
+
+# ─────────────────────────────────────────────
+# Dealings with the daemon
+# ─────────────────────────────────────────────
+
+# Sorted, de-duplicated output of a listing command (empty if it fails)
+ids() { { "$@" 2>/dev/null || true; } | sort -u; }
+
+# How many words are in a list, and how many fewer remain after a gate
+count() { set -- $1; echo $#; }
+gone()  { echo $(( $(count "$1") - $(count "$2") )); }
+
+# Run a removal; if it fails, show the first thing it complained about and go on
+rite() {
+  local err
+  if ! err=$("$@" 2>&1 >/dev/null); then
+    err="${err%%$'\n'*}"
+    warn "${err:-$* failed}"
+  fi
+}
+
+# One row's SIZE from `docker system df`, as docker prints it (e.g. 3.7GB)
+df_size() {
+  { docker system df --format '{{.Type}}|{{.Size}}' 2>/dev/null || true; } |
+    awk -F'|' -v type="$1" '$1 == type { print $2 }'
+}
+
+# Total bytes Docker holds: the SIZE column of `docker system df`, summed
+docker_bytes() {
+  { docker system df --format '{{.Size}}' 2>/dev/null || true; } |
+    awk '{
+           n = $1 + 0; unit = $1; sub(/^[0-9.]+/, "", unit)
+           if (unit == "kB") n *= 1e3; else if (unit == "MB") n *= 1e6
+           else if (unit == "GB") n *= 1e9; else if (unit == "TB") n *= 1e12
+           total += n
+         }
+         END { printf "%.0f\n", total }'
+}
+
+human() {
+  awk -v b="$1" 'BEGIN {
+    split("B kB MB GB TB", unit, " "); i = 1
+    while (b >= 1000 && i < 5) { b /= 1000; i++ }
+    fmt = (i == 1) ? "%d %s\n" : "%.1f %s\n"
+    printf fmt, b, unit[i]
+  }'
+}
+
+# ─────────────────────────────────────────────
+# The descent
+# ─────────────────────────────────────────────
+
+docker info >/dev/null 2>&1 ||
+  die "The gates of Ganzer will not open: the Docker daemon is unreachable."
+
+before_bytes=$(docker_bytes)
+
+if [[ -t 1 ]]; then
+  clear 2>/dev/null || true
+fi
+
+border="𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹"
+printf '%s%s%s\n' "$LAPIS" "$border" "$RESET"
+line "From the great heaven she set her mind on the great below."
+line "From the great heaven the goddess set her mind on the great below."
+line "From the great heaven Inanna set her mind on the great below."
+printf '%s%s%s\n' "$LAPIS" "$border" "$RESET"
+pause
+
+echo
+star "She takes up the seven me and sets out for the underworld."
+star "Neti, its chief doorman, bolts the seven gates, then opens each door of Ganzer to her in turn."
+pause
+
+# Gate I: the crown, what currently reigns (running containers)
+gate "𒁹" first "The šugurra, the crown of the steppe, is removed from her head."
+had=$(ids docker ps -q)
+if [[ -n $had ]]; then rite docker kill $had; fi
+carried "$(gone "$had" "$(ids docker ps -q)")" "running container" "running containers" killed
+refrain
+
+# Gate II: many small beads on one string (every container)
+gate "𒈫" second "The small lapis-lazuli beads are removed from her neck."
+had=$(ids docker ps -aq)
+if [[ -n $had ]]; then rite docker rm -f $had; fi
+carried "$(gone "$had" "$(ids docker ps -aq)")" container containers "carried away"
+refrain
+
+# Gate III: eggs, which containers hatch from (images)
+gate "𒐈" third "The twin egg-shaped beads are removed from her breast."
+had=$(ids docker images -q)
+if [[ -n $had ]]; then rite docker rmi -f $had; fi
+carried "$(gone "$had" "$(ids docker images -q)")" image images "carried away"
+refrain
+
+# Gate IV: the call that draws others to her (custom networks)
+gate "𒐉" fourth "The pectoral called \"Come, man, come!\" is removed from her breast."
+had=$(ids docker network ls -q --filter type=custom)
+if [[ -n $had ]]; then rite docker network prune -f; fi
+carried "$(gone "$had" "$(ids docker network ls -q --filter type=custom)")" network networks "carried away"
+refrain
+
+# Gate V: gold does not tarnish; what persists (volumes, named ones too:
+# since Docker 23, `system prune --volumes` only takes anonymous ones)
+gate "𒐊" fifth "The golden ring is removed from her hand."
+had=$(ids docker volume ls -q)
+if [[ -n $had ]]; then rite docker volume rm -f $had; fi
+carried "$(gone "$had" "$(ids docker volume ls -q)")" volume volumes "carried away"
+refrain
+
+# Gate VI: the builder's tools (build cache)
+gate "𒐋" sixth "The lapis-lazuli measuring rod and measuring line are removed from her hand."
+cache=$(df_size "Build Cache")
+rite docker builder prune -af
+if [[ -z $cache || $cache == 0B ]]; then
+  line "    ↳ no build cache"
+else
+  line "    ↳ $cache of build cache carried away"
+fi
+refrain
+
+# Gate VII: the last covering (whatever remains)
+gate "𒐌" seventh "The pala dress, the garment of ladyship, is removed from her body."
+freed=""
+if out=$(docker system prune -af --volumes 2>&1); then
+  freed=$(sed -n 's/^Total reclaimed space: *//p' <<<"$out")
+else
+  warn "${out%%$'\n'*}"
+fi
+if [[ -z $freed || $freed == 0B ]]; then
+  line "    ↳ nothing else remains"
+else
+  line "    ↳ the last $freed carried away"
+fi
+refrain
+
+heading "𒆳" "The throne room"
+line "    She makes her sister Ereshkigal rise from her throne, and sits on it herself."
+line "    The Anunna, the seven judges, render their decision against her."
+pause
+line "    They look at her: it is the look of death."
+line "    They speak to her: it is the speech of anger."
+line "    They shout at her: it is the shout of heavy guilt."
+pause
+line "    The afflicted woman is turned into a corpse, and the corpse is hung on a hook."
+pause
+
+tribute=$(( before_bytes - $(docker_bytes) ))
+echo
+if (( tribute > 0 )); then
+  star "Ereshkigal receives $(human "$tribute")."
+else
+  star "Ereshkigal receives nothing; the underworld was already bare."
+fi
+
+# ─────────────────────────────────────────────
+# The ascent (optional)
+# ─────────────────────────────────────────────
+
+if [[ -z $ASCENT_CMD && -t 0 ]]; then
+  for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+    if [[ -f $f ]]; then
+      echo
+      star "A compose file stirs in the ruins: $f"
+      printf '   Shall Ninshubur go to Enki, and raise her up? [y/N] '
+      answer=""
+      read -r -t 15 answer || echo
+      if [[ $answer == [Yy]* ]]; then
+        ASCENT_CMD="docker compose up -d"
+      fi
+      break
+    fi
+  done
+fi
+
+status=0
+if [[ -n $ASCENT_CMD ]]; then
+  heading "𒀭𒈹" "The ascent"
+  line "    Three days and three nights pass."
+  line "    Ninshubur pleads with Enlil, then with Nanna; both refuse her. Enki does not."
+  line "    From the dirt under his fingernails he fashions the kurgarra and the galatur."
+  pause
+  line "    One sprinkles the life-giving plant upon the corpse, the other the life-giving water."
+  line "    And thus Inanna arose."
+  dim  '    "Who has ever ascended unscathed from the underworld?" Every layer must be pulled anew.'
+  pause
+  echo
+  star "$ASCENT_CMD"
+  echo
+  if eval "$ASCENT_CMD"; then
+    echo
+    star "Inanna returns to Uruk."
+  else
+    status=$?
+    echo
+    star "The galla will not let her go: the ascent failed (exit $status)."
   fi
 else
-  echo -e "\033[35m☿  She remains below. Rebuild when you are ready.\033[0m"
+  echo
+  line "Three days and three nights she hangs upon the hook."
+  line "Ninshubur awaits your word. Rebuild when you are ready."
 fi
-echo
+
+printf '\n%s𒀭𒊩𒌆𒆠𒃲  Holy Ereshkigal — sweet is your praise.%s\n\n' "$GOLD" "$RESET"
+exit "$status"
