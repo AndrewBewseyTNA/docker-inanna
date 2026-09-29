@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─────────────────────────────────────────────
+# 𒈹 Inanna’s Descent into the Underworld 𒈹
+# A Ritual Cleansing of Docker
+# ─────────────────────────────────────────────
+
+# Ritual pacing (seconds)
+PACE=1.3
+
+# Speak as the gatekeepers do
+say() {
+  echo -e "\n\033[35m𒈹 𒀭𒈹  $1  𒈹𒀭𒈹\033[0m"
+  sleep "$PACE"
+}
+
+# Run commands without breaking the ritual
+run() {
+  "$@" 2>/dev/null || true
+}
+
+clear
+echo -e "\033[35m"
+cat <<'EOF'
+𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹
+𒀭𒈹 Inanna, Queen of Heaven, turns her gaze below 𒈹𒀭
+𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹𒈹
+EOF
+echo -e "\033[0m"
+sleep 2
+
+say "Gate I — The Shugurra Crown is Removed (running containers)"
+run docker kill $(docker ps -q)
+
+say "Gate II — The Measuring Rod and Line Are Taken (all containers)"
+run docker rm $(docker ps -aq)
+
+say "Gate III — The Lapiz Jewels Are Stripped Away (images)"
+run docker rmi $(docker images -aq)
+
+say "Gate IV — The Tablets of Destiny Are Shattered (volumes)"
+run docker volume rm $(docker volume ls -q)
+
+say "Gate V — The Roads to the City Are Unmade (networks)"
+run docker network rm $(docker network ls -q)
+
+say "Gate VI — Memory and Craft Are Scoured Clean (build cache)"
+run docker builder prune -af
+
+say "Gate VII — All Names Are Forgotten (final system prune)"
+docker system prune -af --volumes
+
+sleep 1.5
+echo
+echo -e "\033[35m☿  Inanna stands before Ereshkigal.\033[0m"
+sleep 1
+echo -e "\033[35m☿  The old forms are dust.\033[0m"
+sleep 1
+echo -e "\033[35m☿  Docker is purified. The descent is complete.\033[0m"
+echo
+
+# ─────────────────────────────────────────────
+# The Ascent — optional resurrection
+# ─────────────────────────────────────────────
+
+COMPOSE_FILE=""
+if [[ -f "docker-compose.yml" ]]; then
+  COMPOSE_FILE="docker-compose.yml"
+elif [[ -f "docker-compose.yaml" ]]; then
+  COMPOSE_FILE="docker-compose.yaml"
+fi
+
+ASCENT_CMD="${1:-}"
+
+if [[ -n "$ASCENT_CMD" ]]; then
+  # Explicit command passed as argument
+  say "The Ascent — Inanna returns, bearing new forms"
+  sleep 1
+  echo -e "\033[35m☿  Running: $ASCENT_CMD\033[0m"
+  echo
+  eval "$ASCENT_CMD"
+elif [[ -n "$COMPOSE_FILE" ]]; then
+  # Found a compose file in cwd — ask whether to bring it up
+  echo -e "\033[35m☿  A docker-compose file stirs in the ruins: $COMPOSE_FILE\033[0m"
+  sleep 1
+  echo -e "\033[35m☿  Shall Inanna ascend and raise what was lost? [y/N]\033[0m "
+  read -r -t 15 ANSWER || ANSWER="n"
+  if [[ "${ANSWER,,}" == "y" ]]; then
+    say "The Ascent — Inanna returns, bearing new forms"
+    docker compose up -d
+    echo
+    echo -e "\033[35m☿  The world is rebuilt. Inanna reigns again.\033[0m"
+  else
+    echo -e "\033[35m☿  She remains below. Rebuild when you are ready.\033[0m"
+  fi
+else
+  echo -e "\033[35m☿  She remains below. Rebuild when you are ready.\033[0m"
+fi
+echo
